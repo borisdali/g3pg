@@ -1,0 +1,15 @@
+bases:
+- ../../../AppName
+commonLabels:
+  "graybox.anthosapis.com/app": appName
+  "graybox.anthosapis.com/env": envName
+nameSuffix: "-appName-envName"
+namespace: namespaceFleet
+patches:
+- path: instance.yaml
+  target:
+    kind: Instance
+- path: instance_topology.yaml
+  target:
+    kind: InstanceTopology
+

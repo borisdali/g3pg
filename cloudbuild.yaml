@@ -1,0 +1,153 @@
+substitutions:
+  "_GITHUB_USER": "borisdali"
+  "_SOURCE_REPO": "gray"
+  "_DEST_REPO": "gray-wet"
+  "_SECRET_NAME": "cloud-build-secret"
+  "_PROJECT_HYDRATE": "bdali-playground-graybox"
+  "_APPS": "do-not-change"
+timeout: 720s
+steps:
+- name: gcr.io/cloud-builders/gcloud
+  # This step works for public repos only:
+  # - name: 'gcr.io/cloud-builders/git'
+  #   id: 'Clone a DRY repo'
+  #   args: ['clone', "https://github.com/${_GITHUB_USER}/${_SOURCE_REPO}.git"]
+  #   dir: /source
+  #   volumes:
+  #   - name: source
+  #     path: /source
+
+  id: 'Setup id_github file from Secret Manager'
+  entrypoint: 'bash'
+  args: ['-c', 'gcloud secrets versions access latest --secret=${_SECRET_NAME} > /root/.ssh/id_github']
+  volumes:
+  - name: 'ssh'
+    path: /root/.ssh
+
+- name: 'gcr.io/cloud-builders/git'
+  id: 'Create ssh config and add GitHub as a known host'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    chmod 600 /root/.ssh/id_github
+    cat <<EOF >/root/.ssh/config
+    Hostname github.com
+    IdentityFile /root/.ssh/id_github
+    EOF
+    ssh-keyscan -t rsa github.com > /root/.ssh/known_hosts
+  volumes:
+  - name: 'ssh'
+    path: /root/.ssh
+
+- name: 'gcr.io/cloud-builders/git'
+  id: 'Clone a DRY repo'
+  args:
+  - clone
+  - --recurse-submodules
+  - git@github.com:${_GITHUB_USER}/${_SOURCE_REPO}
+  dir: /source
+  volumes:
+  - name: 'ssh'
+    path: /root/.ssh
+  - name: 'source'
+    path: /source
+
+- name: 'gcr.io/cloud-builders/git'
+  id: 'Clone a WET repo'
+  args:
+  - clone
+  - --recurse-submodules
+  - git@github.com:${_GITHUB_USER}/${_DEST_REPO}
+  dir: /dest
+  volumes:
+  - name: 'ssh'
+    path: /root/.ssh
+  - name: 'dest'
+    path: /dest
+
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  id: 'Determine what changed'
+  waitFor:
+  - 'Clone a DRY repo'
+  - 'Clone a WET repo'
+  dir: /source
+  entrypoint: /bin/sh
+  args:
+  - '-c'
+  - |
+    cd /source/${_SOURCE_REPO}
+    git remote get-url origin
+    git status
+
+    for app in `ls -d apps/*|grep -v envs`; do
+      if git diff HEAD^ --quiet $app; then
+        echo "$app app NOT changed"
+      else
+        echo "$app changed"
+        echo $app|awk -F/ '{print$2}'>> /tmp/apps
+        git diff HEAD^ $app
+      fi
+    done
+
+    for app in `ls -d apps/envs/*|grep -v template`; do
+      if git diff HEAD^ --quiet $app; then
+        echo "$app NOT changed"
+      else
+        echo "$app changed"
+        echo $app|awk -F/ '{print$3}'>> /tmp/apps
+        git diff HEAD^ $app
+      fi
+    done
+
+    if [ -f /tmp/apps ]; then
+      sort /tmp/apps | uniq > /workspace/appsu
+      echo -e "Verdict: app(s) changed: \n`cat /workspace/appsu`"
+    else
+      echo "Verdict: No app changes, existing..."
+      gcloud builds cancel $BUILD_ID > /dev/null || true
+    fi
+  timeout: 60s
+  volumes:
+  - name: source
+    path: /source
+  - name: 'ssh'
+    path: /root/.ssh
+
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  id: 'Prep kustomize'
+  waitFor:
+  - 'Determine what changed'
+  dir: /kustomize
+  entrypoint: /bin/bash
+  args:
+  - '-c'
+  - |
+    curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"  | bash
+  timeout: 60s
+  volumes:
+  - name: kustomize
+    path: /kustomize
+
+- name: 'gcr.io/${_PROJECT_HYDRATE}/hydrate'
+  id: 'Transform'
+  waitFor:
+  - 'Prep kustomize'
+  dir: /dest/${_DEST_REPO}
+  entrypoint: /hydrate
+  args: ["--repo_source_dir", "/source/${_SOURCE_REPO}", "--repo_dest_dir", "/dest/${_DEST_REPO}", "--repo_dest", "git@github.com:${_GITHUB_USER}/${_DEST_REPO}.git", "--private_key", "/root/.ssh/id_github", "--debug", "--nodryrun"]
+  env:
+  - 'SSH_KNOWN_HOSTS=/root/.ssh/known_hosts'
+  - 'KUSTOMIZE_PATH=/kustomize'
+  - 'GRAYBOX_APPS=/workspace/appsu'
+  timeout: 120s
+  volumes:
+  - name: source
+    path: /source
+  - name: dest
+    path: /dest
+  - name: kustomize
+    path: /kustomize
+  - name: 'ssh'
+    path: /root/.ssh
+

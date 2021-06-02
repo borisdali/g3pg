@@ -1,0 +1,8 @@
+apiVersion: kpt.dev/v1alpha1
+kind: Kptfile
+metadata:
+  name: pg01
+packageMetadata:
+  tags:
+  - kpt.dev/app=graybox
+  shortDescription: Graybox pg01 kpt package

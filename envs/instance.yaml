@@ -1,0 +1,3 @@
+- op: add
+  path: "/spec/parameters/dummy-parameter-NAME-replaceMe-if-needed"
+  value: "dummy-parameter-VALUE-replaceMe-if-needed"

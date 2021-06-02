@@ -1,0 +1,23 @@
+apiVersion: graybox.anthosapis.com/v1alpha1
+kind: InstanceSet
+metadata:
+  name: system-generated-ignore
+spec:
+  appProperties:
+    envs:
+    - name: "dev"
+    - name: "prod"
+      # includeInReleasePipeline: true
+      # releasePipelinePreviousEnvironmentDelay: 168h
+    tier: Development
+    growthProfile: "Transactional"
+    upgradePolicy: "Manual"
+    slos:
+    - type: "Availability"
+      target: "99.9"
+      duration: "168h" # 7 days
+      #duration: "720h" # 30 days
+      startTime: "2021-02-16T20:05:00Z"
+    # manintenanceWindows:
+    # upgradeSoakingSchedule:
+
